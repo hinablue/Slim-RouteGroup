@@ -5,7 +5,7 @@ Slim-RouteGroup
 
 [Slim Framework News](http://www.slimframework.com/news/version-230)
 
-In the 2.3.0, Slim can group your own group, but the group callback function more like the global middleware function. For example,
+In the 2.3.0, Slim can group your own routes, but the group callback function more like the global middleware function. For example,
 
 ``` php
 $app->group('/first', function() use ( $app ) {
@@ -29,7 +29,7 @@ So, I said the group callback function more like the global middleware function 
 
 ###RouteGroup
 
-I do some work that for group route, you can use this class to make the group callback function ONLY in matched route path. For example,
+I do some work that for group route, you can use this class to make the group callback function ONLY in the matched route path. For example,
 
 ``` php
 class myRoute extends RouteGroup {
@@ -76,3 +76,13 @@ $app->group('/first', $myroute->run(
 So, if you open the `/other/route` you will see no message output.
 
 See the example for more.
+
+License
+=======
+
+Licensed under the MIT License.
+
+Authors
+=======
+
+Copyright(c) 2013 Hina Chen <hinablue@gmail.com>
