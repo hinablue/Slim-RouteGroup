@@ -1,0 +1,15 @@
+{
+    "name": "Example",
+    "description": "Example",
+    "require": {
+        "php": ">=5.4.0",
+        "slim/slim": "2.3.*",
+        "slim/views": "*",
+        "twig/twig": "*"
+    },
+    "autoload": {
+        "classmap": [
+            "lib/RouteGroup.php"
+        ]
+    }
+}
