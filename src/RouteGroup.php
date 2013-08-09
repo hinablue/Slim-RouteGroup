@@ -22,19 +22,25 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
             }
             $requestUri .= $group['path'];
         }
-        $view_path = explode('/', $view['path']);
+        $view_path = explode('/', $requestUri.$view['path']);
         $preg_path = array();
+        $conditions = $view['conditions'];
         foreach($view_path as $path) {
+            $condition = '';
             if (preg_match("/:(?P<path>[a-z0-9_]+)/i", $path, $m)) {
-                array_push($preg_path, '(?P<'.$m['path'].'>[0-9a-z_\-]+)');
+                if (isset($conditions[$m['path']])) {
+                    $condition = str_replace(array('(', ')'), '', $conditions[$m['path']]);
+                    array_push($preg_path, '(?P<'.$m['path'].'>'.$condition.')');
+                } else {
+                    array_push($preg_path, '(?P<'.$m['path'].'>[0-9a-z_\-]+)');
+                }
+            } else {
+                array_push($preg_path, $path);
             }
         }
+        unset($condition);
         unset($view_path);
-        if (count($preg_path) > 0) {
-            $requestUri .= '/'.implode('/', $preg_path);
-        } else {
-            $requestUri .= $view['path'];
-        }
+        $requestUri = implode('/', $preg_path);
         $requestUri = str_replace('/', '\/', $requestUri);
 
         $app = \Slim\Slim::getInstance();
@@ -105,25 +111,27 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
                 array_push($arguments, $group);
 
                 if ($groups['process']) call_user_func_array(array($self, $group['name'].'View'), $arguments);
-
-                $app->render($group['view'], $group['data']);
             }
         );
 
         return function() use ( $app, $group, $self, $_params ) {
             $return = call_user_func_array(array($app, $group['method']), $_params);
             if ($return) {
-                if (is_array($group['conditions']) && count($group['conditions']) > 0) {
-                    $return->conditions($group['conditions']);
-                } else {
-                    throw new Exception("Conditions must be an array.", 1);
+                if (isset($group['conditions'])) {
+                    if (is_array($group['conditions']) && count($group['conditions']) > 0) {
+                        $return->conditions($group['conditions']);
+                    } else {
+                        throw new Exception("Conditions must be an array.", 1);
+                    }
                 }
-                if (is_array($group['via']) && count($group['via'] > 0)) {
-                    call_user_func_array(array($return, 'via'), array_map('strtoupper', $group['via']));
-                } else {
-                    throw new Exception("Via must be an array.", 1);
+                if (isset($group['via'])) {
+                   if (is_array($group['via']) && count($group['via'] > 0)) {
+                        call_user_func_array(array($return, 'via'), array_map('strtoupper', $group['via']));
+                    } else {
+                        throw new Exception("Via must be an array.", 1);
+                    }
                 }
-                if (!empty($group['route_name'])) {
+                if (isset($group['route_name']) && !empty($group['route_name'])) {
                     $return->name($group['route_name']);
                 }
             }
@@ -131,7 +139,7 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
     }
 
     private function mergeMiddleware( array $params, array $group ) {
-        if (is_array($group['middlewares']) && count($group['middlewares']) > 0) {
+        if (isset($group['middlewares']) && is_array($group['middlewares']) && count($group['middlewares']) > 0) {
             foreach($group['middlewares'] as $middleware) {
                 array_push($params, $middleware);
             }
