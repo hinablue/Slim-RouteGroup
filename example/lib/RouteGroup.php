@@ -77,6 +77,8 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
 
             $groups['flag'] = false;
             $group = array_shift($groups['group']);
+
+            if ($group === NULL) return $this->runView( $groups['view'], $groups );
         }
 
         $_params = array($group['path']);
