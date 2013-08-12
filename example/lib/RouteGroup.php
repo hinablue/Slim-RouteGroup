@@ -16,52 +16,49 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
 
         $view = array_pop($arguments);
         $requestUri = '';
+
         foreach($arguments as $group) {
             if (!isset($group['path']) || empty($group['path'])) {
                 throw new Exception($group['name']." path is empty.");
             }
             $requestUri .= $group['path'];
         }
-        $view_path = explode('/', $requestUri.$view['path']);
-        $preg_path = array();
-        $conditions = $view['conditions'];
-        foreach($view_path as $path) {
-            $condition = '';
-            if (preg_match("/:(?P<path>[a-z0-9_]+)/i", $path, $m)) {
-                if (isset($conditions[$m['path']])) {
-                    $condition = str_replace(array('(', ')'), '', $conditions[$m['path']]);
-                    array_push($preg_path, '(?P<'.$m['path'].'>'.$condition.')');
-                } else {
-                    array_push($preg_path, '(?P<'.$m['path'].'>[0-9a-z_\-]+)');
-                }
-            } else {
-                array_push($preg_path, $path);
+        $patternAsRegex = preg_replace_callback('#:(?P<path>[\w]+)\+?#', function($m) {
+            if (isset($view['conditions'][$m['path']])) {
+                return '(?P<'.$m['path'].'>'.$view['conditions'][$m['path']].')';
             }
-        }
-        unset($condition);
-        unset($view_path);
-        $requestUri = implode('/', $preg_path);
-        $requestUri = str_replace('/', '\/', $requestUri);
+            if (substr($m[0], -1) === '+') return '(?P<'.$m['path'].'>.+)';
+            return '(?P<'.$m['path'].'>[^/]+)';
+        }, str_replace(')', ')?', $requestUri.$view['path']));
+
+        if (substr($patternAsRegex, -1) === '/') $patternAsRegex .= '?';
 
         $app = \Slim\Slim::getInstance();
         $process = false;
-        if (preg_match("/".$requestUri."/i", $app->request->getResourceUri())) {
+        $params = 0;
+
+        if (preg_match('#^'.$patternAsRegex.'$#', $app->request->getResourceUri())) {
+            if (preg_match_all('#:[\w]+\+?#', $requestUri.$view['path'], $m)) {
+                $params = count($m[0]);
+                unset($m);
+            }
             $process = true;
         }
 
-        $groups = array('group' => $arguments, 'view' => $view, 'flag' => true, 'process' => $process);
+        $groups = array('group' => $arguments, 'view' => $view, 'flag' => true, 'process' => $process, 'params_count' => $params);
  
-        return $this->runGroup( $groups );
+        return $this->runGroup( $groups, $app );
 
         unset($view);
         unset($requestUri);
         unset($process);
+        unset($params);
         unset($app);
     }
 
-    private function runGroup( $groups ) {
+    private function runGroup( $groups, $app ) {
         if (count($groups['group']) === 0) {
-            return $this->runView( $groups['view'], $groups );
+            return $this->runView( $groups['view'], $groups, $app );
         }
 
         $group = array_shift($groups['group']);
@@ -70,38 +67,37 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
             throw new Exception("Group does not exists.", 1);
         }
 
-        $app = \Slim\Slim::getInstance();
-
         if ($groups['flag']) {
             if ($groups['process']) call_user_func_array(array($this, $group['name'].'Group'), array($app, $group));
 
             $groups['flag'] = false;
             $group = array_shift($groups['group']);
 
-            if ($group === NULL) return $this->runView( $groups['view'], $groups );
+            if ($group === NULL) return $this->runView( $groups['view'], $groups, $app );
         }
 
         $_params = array($group['path']);
         $_params = $this->mergeMiddleware( $_params, $group );
-        array_push($_params, $this->runGroup($groups));
+        array_push($_params, $this->runGroup($groups, $app));
 
         unset($requestUri);
 
         return function() use ( $app, $group, $_params, $groups ) {
+            if (!method_exists($this, $group['name'].'Group')) {
+                throw new Exception("Group method `".$group['name']."Group` does not exists.", 1);
+            }
             if ($groups['process']) call_user_func_array(array($this, $group['name'].'Group'), array($app, $group));
 
             call_user_func_array(array( $app, 'group' ), $_params);
         };
     }
 
-    private function runView( $group, $groups ) {
+    private function runView( $group, $groups, $app ) {
         $self = $this;
 
         if (!method_exists($this, $group['name'].'View')) {
             throw new Exception("Finial View is missing.", 1);
         }
-
-        $app = \Slim\Slim::getInstance();
 
         $_params = array($group['path']);
         $_params = $this->mergeMiddleware( $_params, $group );
@@ -109,9 +105,17 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
         array_push($_params, 
             function () use ( $app, $self, $group, $groups ) {
                 $arguments = func_get_args();
+                if (count($arguments) < $groups['params_count']) {
+                    for($i = count($arguments); $i< $groups['params_count']; $i++) {
+                        array_push($arguments, null);
+                    }
+                }
                 array_push($arguments, $app);
                 array_push($arguments, $group);
 
+                if (!method_exists($self, $group['name'].'View')) {
+                    throw new Exception("View method `".$group['name']."View` does not exists.", 1);
+                }
                 if ($groups['process']) call_user_func_array(array($self, $group['name'].'View'), $arguments);
             }
         );
@@ -148,6 +152,22 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
         }
 
         return $params;
+    }
+
+    public function getCurrectUrl( $path = '/' ) {
+        if (isset($_SERVER['HTTPS']) && 
+            ($_SERVER['HTTPS'] === 'on' || $_SERVER['HTTPS'] === 1) ||
+             isset($_SERVER['HTTP_X_FORWARDED_PROTO']) &&
+            $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+            $protocol = 'https://';
+        } else {
+            $protocol = 'http://';
+        }
+        $port = isset($parts['port']) &&
+            (($protocol === 'http://' && $parts['port'] !== 80) ||
+            ($protocol === 'https://' && $parts['port'] !== 443))
+            ? ':' . $parts['port'] : '';
+        return $protocol . $_SERVER['HTTP_HOST'] . $port . $path;
     }
 
     public function offsetExists($offset) {
