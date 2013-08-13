@@ -41,9 +41,9 @@ $app->group('/user', $indexRoute->run(
     ),
     array(
         'name' => 'authenticate',
-        'path' => '/:oauth_provider',
+        'path' => '/:provider',
         'middlewares' => array($authenticate),
-        'conditions' => array("name" => "(google|twitter|facebook)"),
+        'conditions' => array("provider" => "(google|twitter|facebook)"),
         'method' => 'map',
         'via' => array('get','post'),
         'view' => 'index.phtml',

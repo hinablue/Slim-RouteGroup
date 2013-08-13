@@ -8,10 +8,10 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
         $arguments = func_get_args();
 
         if (count($arguments) === 0) {
-            throw new Exception("Initial configuration is empty.", 1);
+            throw new Exception("Initial configuration is empty.", 0);
         }
         if (count($arguments) === 1) {
-            throw new Exception("Last view configuration is missing.", 1);
+            throw new Exception("Last view configuration is missing.", 0);
         }
 
         $view = array_pop($arguments);
@@ -35,17 +35,17 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
 
         $app = \Slim\Slim::getInstance();
         $process = false;
-        $params = 0;
+        $params = array();
 
         if (preg_match('#^'.$patternAsRegex.'$#', $app->request->getResourceUri())) {
-            if (preg_match_all('#:[\w]+\+?#', $requestUri.$view['path'], $m)) {
-                $params = count($m[0]);
+            if (preg_match_all('#:(?P<parameters>[\w]+)\+?#', $requestUri.$view['path'], $m)) {
+                $params = $m['parameters'];
                 unset($m);
             }
             $process = true;
         }
 
-        $groups = array('group' => $arguments, 'view' => $view, 'flag' => true, 'process' => $process, 'params_count' => $params);
+        $groups = array('group' => $arguments, 'view' => $view, 'flag' => true, 'process' => $process, 'params' => $params);
  
         return $this->runGroup( $groups, $app );
 
@@ -62,13 +62,30 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
         }
 
         $group = array_shift($groups['group']);
-
         if (!method_exists($this, $group['name'].'Group')) {
-            throw new Exception("Group does not exists.", 1);
+            throw new Exception("Group does not exists.", 0);
         }
 
         if ($groups['flag']) {
-            if ($groups['process']) call_user_func_array(array($this, $group['name'].'Group'), array($app, $group));
+            if ($groups['process']) {
+                $callable_params = array();
+                $refl = new ReflectionMethod(get_class($this), $group['name'].'Group');
+                foreach( $refl->getParameters() as $param ) {
+                    $param = $param->getName();
+                    if (isset($$param)) {
+                        array_push($callable_params, $$param);
+                    } else {
+                        unset($refl);
+                        unset($callable_params);
+                        throw new Exception('$'.$param.' parameter does not exists.', 0);
+                    }
+                }
+                unset($refl);
+
+                call_user_func_array(array($this, $group['name'].'Group'), $callable_params);
+
+                unset($callable_params);
+            }
 
             $groups['flag'] = false;
             $group = array_shift($groups['group']);
@@ -84,9 +101,27 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
 
         return function() use ( $app, $group, $_params, $groups ) {
             if (!method_exists($this, $group['name'].'Group')) {
-                throw new Exception("Group method `".$group['name']."Group` does not exists.", 1);
+                throw new Exception("Group method `".$group['name']."Group` does not exists.", 0);
             }
-            if ($groups['process']) call_user_func_array(array($this, $group['name'].'Group'), array($app, $group));
+
+            $callable_params = array();
+ 
+            if ($groups['process']) {
+                $refl = new ReflectionMethod(get_class($this), $group['name'].'Group');
+                foreach( $refl->getParameters() as $param ) {
+                    $param = $param->getName();
+                    if (isset($$param)) {
+                        array_push($callable_params, $$param);
+                    } else {
+                        unset($refl);
+                        unset($callable_params);
+                        throw new Exception('$'.$param.' parameter does not exists.', 0);
+                    }
+                }
+                unset($refl);
+
+                call_user_func_array(array($this, $group['name'].'Group'), $callable_params);
+            }
 
             call_user_func_array(array( $app, 'group' ), $_params);
         };
@@ -96,7 +131,7 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
         $self = $this;
 
         if (!method_exists($this, $group['name'].'View')) {
-            throw new Exception("Finial View is missing.", 1);
+            throw new Exception("Finial View is missing.", 0);
         }
 
         $_params = array($group['path']);
@@ -104,19 +139,36 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
 
         array_push($_params, 
             function () use ( $app, $self, $group, $groups ) {
-                $arguments = func_get_args();
-                if (count($arguments) < $groups['params_count']) {
-                    for($i = count($arguments); $i< $groups['params_count']; $i++) {
-                        array_push($arguments, null);
-                    }
-                }
-                array_push($arguments, $app);
-                array_push($arguments, $group);
-
                 if (!method_exists($self, $group['name'].'View')) {
-                    throw new Exception("View method `".$group['name']."View` does not exists.", 1);
+                    throw new Exception("View method `".$group['name']."View` does not exists.", 0);
                 }
-                if ($groups['process']) call_user_func_array(array($self, $group['name'].'View'), $arguments);
+
+                if ($groups['process']) {
+                    $callable_params = array();
+                    $arguments = func_get_args();
+                    $refl = new ReflectionMethod(get_class($self), $group['name'].'View');
+                    foreach( $refl->getParameters() as $param ) {
+                        $param = $param->getName();
+                        if (isset($$param)) {
+                            array_push($callable_params, $$param);
+                        } else {
+                            if (($key = array_search($param, $groups['params'])) >= 0) {
+                                if (isset($arguments[$key]))  {
+                                    array_push($callable_params, $arguments[$key]);
+                                } else {
+                                    array_push($callable_params, null);
+                                }
+                            } else {
+                                throw new Exception('$'.$param.' parameter does not exists.', 0);
+                            }
+                        }
+                    }
+                    unset($refl);
+
+                    call_user_func_array(array($self, $group['name'].'View'), $callable_params);
+
+                    unset($callable_params);
+                }
             }
         );
 
@@ -127,14 +179,14 @@ class RouterGroup implements \ArrayAccess, \IteratorAggregate {
                     if (is_array($group['conditions']) && count($group['conditions']) > 0) {
                         $return->conditions($group['conditions']);
                     } else {
-                        throw new Exception("Conditions must be an array.", 1);
+                        throw new Exception("Conditions must be an array.", 0);
                     }
                 }
                 if (isset($group['via'])) {
                    if (is_array($group['via']) && count($group['via'] > 0)) {
                         call_user_func_array(array($return, 'via'), array_map('strtoupper', $group['via']));
                     } else {
-                        throw new Exception("Via must be an array.", 1);
+                        throw new Exception("Via must be an array.", 0);
                     }
                 }
                 if (isset($group['route_name']) && !empty($group['route_name'])) {

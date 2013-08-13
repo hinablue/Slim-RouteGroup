@@ -77,6 +77,59 @@ So, if you open the `/other/route` you will see no message output.
 
 See the example for more.
 
+###Magic \(Dirty\) method
+
+When you use the conditions in your view, you can got the parameters in your view function, and, there is no need to care about the arguments order but name. For example,
+
+``` php
+class myRoute extends RouteGroup {
+
+    protected function firstGroup( $app, $group ) {
+        echo "first group here.";
+    }
+
+    protected function lastView( $name, $mykey, $app, $group ) {
+        echo "last view here.";
+
+        $app->render($group['view'], $group['data']);
+    }
+}
+
+$myroute = new myRoute();
+
+$app->group('/first', $myroute->run(
+    array(
+        'name' => 'first',
+        'path' => '/first',
+        'middlewares' => array()
+    ),
+    array(
+        'name' => 'last',
+        'path' => '/:name/:mykey',
+        'middlewares' => array(),
+        'conditions' => array(
+            'name' => '([a-z0-9]+)',
+            'mykey' => '([a-f0-9]{8})'
+        ),
+        'method' => 'get',
+        'data' => array()
+    )
+));
+```
+
+Or, `lastView` function can be,
+
+``` php
+    protected function lastView( $name, $group, $mykey, $app ) {
+        echo "last view here.";
+
+        $app->render($group['view'], $group['data']);
+    }
+
+```
+
+The function arguments depends on what you have named name but not by argument order.
+
 License
 =======
 
